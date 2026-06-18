@@ -38,7 +38,7 @@ from psycopg.errors import InvalidCatalogName
 from psycopg.rows import dict_row
 from psycopg.sql import Identifier, SQL
 
-DEFAULT_LANG = "zh"
+DEFAULT_LANG = "en"
 SUPPORTED_LANGS = ("zh", "en")
 HOME_SECTION_KEYS = ("bestSeller", "newArrival", "specialPrice")
 ORDER_STATUSES = ("pending_payment", "paid", "shipped", "completed", "cancelled")
