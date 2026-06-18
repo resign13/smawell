@@ -1,0 +1,10 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+_vendor
+data
+server.out.log
+server.err.log
+restart.out.log
+restart.err.log
