@@ -215,7 +215,10 @@ def build_homepage_payload(lang: str) -> dict[str, Any]:
     product_map = {int(item["id"]): item for item in products}
     category_items = list_category_labels(lang)
     category_map = {item["key"]: item["label"] for item in category_items}
-    all_categories = [{"key": item["key"], "label": item["label"]} for item in category_items]
+    all_categories = [
+        {"key": item["key"], "label": item["label"], "imageUrl": item.get("imageUrl", "")}
+        for item in category_items
+    ]
 
     selected_banners = []
     for key in HOME_SECTION_KEYS:
@@ -244,7 +247,11 @@ def build_homepage_payload(lang: str) -> dict[str, Any]:
         sections[key] = section_items
 
     categories = [
-        {"key": key, "label": category_map[key]}
+        {
+            "key": key,
+            "label": category_map[key],
+            "imageUrl": next((item.get("imageUrl", "") for item in category_items if item["key"] == key), ""),
+        }
         for key in config["displayCategoryKeys"]
         if key in category_map
     ]
