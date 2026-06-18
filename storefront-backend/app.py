@@ -65,6 +65,7 @@ CORS(app)
 F = TypeVar("F", bound=Callable[..., Any])
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_PUBLIC_BASE_URL = __import__("os").environ.get("UPLOAD_PUBLIC_BASE_URL", "").strip().rstrip("/")
 FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 SUPPORTED_LANGS = {"zh", "en"}
@@ -100,6 +101,8 @@ def utc_now() -> str:
 
 
 def build_upload_url(filename: str) -> str:
+    if UPLOAD_PUBLIC_BASE_URL:
+        return f"{UPLOAD_PUBLIC_BASE_URL}/{filename}"
     return f"{request.url_root.rstrip('/')}/uploads/{filename}"
 
 
