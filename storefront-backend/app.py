@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
+import mimetypes
 import re
 import secrets
 import sys
@@ -31,9 +33,13 @@ def load_env_file(path: Path) -> None:
 
 load_env_file(BASE_DIR / ".env")
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from werkzeug.security import check_password_hash
+try:
+    import boto3
+except Exception:  # noqa: BLE001
+    boto3 = None
 
 from db import (
     cancel_order,
@@ -59,10 +65,15 @@ CORS(app)
 F = TypeVar("F", bound=Callable[..., Any])
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = BASE_DIR / "uploads"
+FRONTEND_DIST = BASE_DIR.parent / "frontend" / "dist"
 SESSIONS_FILE = DATA_DIR / "sessions.json"
 SUPPORTED_LANGS = {"zh", "en"}
 DEFAULT_LANG = "zh"
 HOME_SECTION_KEYS = ("bestSeller", "newArrival", "specialPrice")
+R2_ACCOUNT_ID = __import__("os").environ.get("R2_ACCOUNT_ID", "").strip()
+R2_ACCESS_KEY_ID = __import__("os").environ.get("R2_ACCESS_KEY_ID", "").strip()
+R2_SECRET_ACCESS_KEY = __import__("os").environ.get("R2_SECRET_ACCESS_KEY", "").strip()
+R2_BUCKET = __import__("os").environ.get("R2_BUCKET", "").strip()
 
 
 def read_json(path: Path) -> Any:
@@ -80,12 +91,50 @@ def ensure_storage() -> None:
         write_json(SESSIONS_FILE, [])
 
 
+def frontend_ready() -> bool:
+    return (FRONTEND_DIST / "index.html").exists()
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
 def build_upload_url(filename: str) -> str:
     return f"{request.url_root.rstrip('/')}/uploads/{filename}"
+
+
+def r2_enabled() -> bool:
+    return bool(
+        boto3
+        and R2_ACCOUNT_ID
+        and R2_ACCESS_KEY_ID
+        and R2_SECRET_ACCESS_KEY
+        and R2_BUCKET
+    )
+
+
+def upload_file_to_r2(file_storage: Any) -> str:
+    if not r2_enabled():
+        raise RuntimeError("R2 is not configured")
+
+    file_name = str(file_storage.filename or "").strip() or f"upload-{secrets.token_hex(4)}.jpg"
+    suffix = Path(file_name).suffix.lower() or ".jpg"
+    content_type = file_storage.mimetype or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    file_bytes = file_storage.read()
+    file_storage.stream.seek(0)
+    if not file_bytes:
+        raise ValueError("Empty file")
+
+    key = f"storefront/{datetime.now(UTC):%Y/%m/%d}/{secrets.token_hex(12)}{suffix}"
+    client = boto3.client(
+        "s3",
+        endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+    )
+    client.put_object(Bucket=R2_BUCKET, Key=key, Body=file_bytes, ContentType=content_type)
+    return build_upload_url(key)
 
 
 def pick_language() -> str:
@@ -384,7 +433,25 @@ def collection_products(section_slug: str) -> Any:
 
 @app.get("/uploads/<path:filename>")
 def serve_upload(filename: str) -> Any:
-    return send_from_directory(UPLOAD_DIR, filename)
+    local_file = UPLOAD_DIR / filename
+    if local_file.exists() and local_file.is_file():
+        return send_from_directory(UPLOAD_DIR, filename)
+    if r2_enabled():
+        client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            aws_access_key_id=R2_ACCESS_KEY_ID,
+            aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+            region_name="auto",
+        )
+        try:
+            obj = client.get_object(Bucket=R2_BUCKET, Key=filename)
+        except Exception:  # noqa: BLE001
+            return jsonify({"message": "Not found"}), 404
+        content = obj["Body"].read()
+        content_type = obj.get("ContentType") or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return send_file(BytesIO(content), mimetype=content_type, download_name=Path(filename).name)
+    return jsonify({"message": "Not found"}), 404
 
 
 ALLOWED_ORDER_ATTACHMENT_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".pdf"}
@@ -403,6 +470,7 @@ def upload_order_attachment() -> Any:
         return jsonify({"message": "You can upload up to 5 attachments"}), 400
 
     items = []
+    uploader = upload_file_to_r2 if r2_enabled() else None
     for file in uploaded_files:
         filename = str(file.filename or "").strip()
         suffix = Path(filename).suffix.lower()
@@ -414,10 +482,14 @@ def upload_order_attachment() -> Any:
         file.stream.seek(0)
         if size > MAX_ORDER_ATTACHMENT_SIZE:
             return jsonify({"message": "Each attachment must be 10MB or smaller"}), 400
-        safe_name = f"{secrets.token_hex(8)}_{Path(filename).name}"
-        target = UPLOAD_DIR / safe_name
-        file.save(target)
-        items.append({"url": build_upload_url(safe_name), "filename": filename})
+        if uploader:
+            url = uploader(file)
+        else:
+            safe_name = f"{secrets.token_hex(8)}_{Path(filename).name}"
+            target = UPLOAD_DIR / safe_name
+            file.save(target)
+            url = build_upload_url(safe_name)
+        items.append({"url": url, "filename": filename})
 
     if len(items) == 1:
         return jsonify({**items[0], "items": items})
@@ -513,6 +585,35 @@ def cancel_store_order(order_id: int) -> Any:
     except RuntimeError as exc:
         return jsonify({"message": str(exc)}), 400
     return jsonify({"message": "Order cancelled successfully", "order": order})
+
+
+@app.get("/")
+def serve_index() -> Any:
+    if frontend_ready():
+        return send_from_directory(FRONTEND_DIST, "index.html")
+    return jsonify({"message": "Storefront frontend build not found"}), 404
+
+
+@app.get("/assets/<path:filename>")
+def serve_assets(filename: str) -> Any:
+    if frontend_ready():
+        assets_dir = FRONTEND_DIST / "assets"
+        file_path = assets_dir / filename
+        if file_path.exists():
+            return send_from_directory(assets_dir, filename)
+    return jsonify({"message": "Not found"}), 404
+
+
+@app.get("/<path:path>")
+def serve_spa(path: str) -> Any:
+    if path.startswith("api/") or path.startswith("uploads/"):
+        return jsonify({"message": "Not found"}), 404
+    if frontend_ready():
+        target = FRONTEND_DIST / path
+        if target.exists() and target.is_file():
+            return send_from_directory(FRONTEND_DIST, path)
+        return send_from_directory(FRONTEND_DIST, "index.html")
+    return jsonify({"message": "Storefront frontend build not found"}), 404
 
 
 ensure_database_ready()

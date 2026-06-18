@@ -6,8 +6,8 @@ function resolveApiBase() {
     const host = window.location.hostname
     const protocol = window.location.protocol || 'https:'
 
-    if (host === 'smawell.store' || host === 'www.smawell.store') {
-      return `${protocol}//api.smawell.store`
+    if (host === 'smawell.shop' || host === 'www.smawell.shop') {
+      return `${protocol}//api.smawell.shop`
     }
 
     if (host === 'localhost' || host === '127.0.0.1') {
