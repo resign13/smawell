@@ -322,7 +322,7 @@ const heroSlides = computed(() =>
 const categoryCards = computed(() =>
   (catalog.homeCategories || []).map((card) => ({
     ...card,
-    image: categoryMedia[card.key] || categoryMedia.womenswear,
+    image: card.imageUrl || categoryMedia[card.key] || categoryMedia.womenswear,
     caption: homeCopy.value.categoryCaptions[card.key] || card.label,
     to: `/shop${card.key ? `?category=${card.key}` : ''}`,
   }))

@@ -220,6 +220,14 @@ def _empty_bundle() -> dict[str, str]:
 def _apply_schema_migrations(cur: Any) -> None:
     cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS size_chart_image_url TEXT")
     cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS description_image_url TEXT")
+    cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS product_code VARCHAR(120) NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS color_group VARCHAR(120) NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS color_name VARCHAR(120) NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE products ADD COLUMN IF NOT EXISTS color_hex VARCHAR(32) NOT NULL DEFAULT ''")
+    cur.execute("ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS image_url TEXT")
+    cur.execute("UPDATE products SET product_code = COALESCE(NULLIF(product_code, ''), sku), color_group = COALESCE(NULLIF(color_group, ''), sku), color_name = COALESCE(NULLIF(color_name, ''), 'Default'), color_hex = COALESCE(NULLIF(color_hex, ''), '#999999')")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_products_product_code ON products(product_code)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_products_color_group ON products(color_group)")
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS product_size_prices (
@@ -763,7 +771,7 @@ def get_homepage_config() -> dict[str, Any]:
 def list_category_labels(lang: str) -> list[dict[str, str]]:
     rows = _fetch_all(
         """
-        SELECT pc.category_key, pct.label
+        SELECT pc.category_key, pct.label, pc.image_url
         FROM product_categories pc
         JOIN product_category_translations pct
           ON pct.category_id = pc.id AND pct.lang_code = %s
@@ -772,7 +780,7 @@ def list_category_labels(lang: str) -> list[dict[str, str]]:
         """,
         (lang,),
     )
-    return [{"key": row["category_key"], "label": row["label"]} for row in rows]
+    return [{"key": row["category_key"], "label": row["label"], "imageUrl": row.get("image_url") or ""} for row in rows]
 
 
 def _build_store_user(row: dict[str, Any], *, include_password_hash: bool) -> dict[str, Any]:
