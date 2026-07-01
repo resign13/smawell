@@ -1,11 +1,11 @@
 <template>
   <header class="site-header">
     <div class="container header-inner">
-      <RouterLink class="brand brand-wordmark" :to="auth.isAuthenticated ? '/home' : '/login'">
+      <RouterLink class="brand brand-wordmark" to="/home">
         {{ locale.t('brand.name') }}
       </RouterLink>
 
-      <nav v-if="auth.isAuthenticated" class="nav-links">
+      <nav class="nav-links">
         <div class="nav-dropdown">
           <RouterLink class="nav-link-button" to="/shop">{{ navCopy.shop }}</RouterLink>
           <div class="nav-dropdown-panel">
@@ -52,8 +52,6 @@
         </RouterLink>
         <a class="nav-link-button" href="/home#contact">{{ navCopy.contact }}</a>
       </nav>
-      <div v-else class="header-spacer"></div>
-
       <div class="header-actions">
         <RouterLink v-if="!auth.isAuthenticated" class="text-action" to="/login">
           {{ navCopy.login }}
@@ -136,7 +134,6 @@ const dropdownSections = computed(() => [
 ])
 
 async function ensureCategoriesLoaded() {
-  if (!auth.isAuthenticated) return
   if ((catalog.categories || []).length) return
   await catalog.loadHome('en')
 }
